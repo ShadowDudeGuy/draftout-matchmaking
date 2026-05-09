@@ -3,27 +3,46 @@ import cors from "cors";
 
 const app = express();
 
-// MUST be before routes
+// middleware
 app.use(cors());
 app.use(express.json());
 
 let queue = [];
 
+app.get("/", (req, res) => {
+    res.send("matchmaking server alive");
+});
+
 app.post("/join", (req, res) => {
-    let name = req.body.name;
+    const name = req.body?.name;
 
-    if (queue.length > 0) {
-        let opponent = queue.shift();
+    console.log("incoming:", req.body);
+    console.log("queue before:", queue);
 
+    if (!name) {
         return res.json({
-            match: true,
-            opponent
+            error: "no name provided"
         });
     }
 
-    queue.push(name);
+    // if someone already waiting → match
+    if (queue.length > 0) {
+        const opponent = queue.shift();
 
-    res.json({
+        console.log("MATCH:", name, "vs", opponent);
+
+        return res.json({
+            match: true,
+            opponent: opponent.name
+        });
+    }
+
+    // add player to queue
+    queue.push({ name });
+
+    console.log("queued:", name);
+
+    return res.json({
         match: false
     });
 });
