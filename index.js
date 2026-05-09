@@ -3,21 +3,24 @@ import cors from "cors";
 
 const app = express();
 
-// Middleware - MUST be before your routes
+// middleware
 app.use(cors());
 app.use(express.json());
 
+// queue + match storage
 let queue = [];
+let matches = new Map();
 
 app.get("/", (req, res) => {
     res.send("Matchmaking server is online.");
 });
 
+
+// JOIN ROUTE
 app.post("/join", (req, res) => {
     const name = req.body?.name;
 
-    // Log the body to your Render dashboard to debug the "incoming: {}" issue
-    console.log("Incoming Body:", req.body);
+    console.log("JOIN:", req.body);
 
     if (!name) {
         return res.status(400).json({
@@ -25,26 +28,65 @@ app.post("/join", (req, res) => {
         });
     }
 
-    // if someone is already waiting
+    // if someone waiting → create match
     if (queue.length > 0) {
         const opponent = queue.shift();
 
-        console.log(`MATCH FOUND: ${name} vs ${opponent.name}`);
+        matches.set(name, opponent.name);
+        matches.set(opponent.name, name);
+
+        console.log("MATCH:", name, "vs", opponent.name);
 
         return res.json({
             match: true,
-            opponent: opponent.name // Accessing the name property correctly
+            opponent: opponent.name
         });
     }
 
-    // Add player as an object so the queue stays consistent
+    // otherwise queue player
     queue.push({ name });
 
-    console.log(`Player queued: ${name}. Queue size: ${queue.length}`);
+    console.log("QUEUED:", name);
 
     return res.json({
         match: false
     });
+});
+
+
+// STATUS ROUTE (THIS FIXES YOUR ISSUE)
+app.post("/status", (req, res) => {
+    const name = req.body?.name;
+
+    if (!name) {
+        return res.status(400).json({
+            error: "no name provided"
+        });
+    }
+
+    const opponent = matches.get(name);
+
+    if (opponent) {
+        return res.json({
+            match: true,
+            opponent
+        });
+    }
+
+    return res.json({
+        match: false
+    });
+});
+
+
+// optional cleanup (prevents memory leaks)
+app.post("/leave", (req, res) => {
+    const name = req.body?.name;
+
+    matches.delete(name);
+    queue = queue.filter(p => p.name !== name);
+
+    res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 10000;
