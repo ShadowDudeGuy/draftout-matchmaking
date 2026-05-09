@@ -1,6 +1,9 @@
 import express from "express";
+import cors from "cors";
 
 const app = express();
+
+// MUST be before routes
 app.use(cors());
 app.use(express.json());
 
@@ -25,7 +28,7 @@ app.post("/join", (req, res) => {
     });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
     console.log("running on port " + PORT);
