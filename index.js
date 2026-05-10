@@ -2,198 +2,198 @@ import express from "express";
 import cors from "cors";
 
 const app = express();
-
-// middleware
 app.use(cors());
 app.use(express.json());
 
-// queue + match storage
 let queue = [];
-let matches = new Map();  // name -> opponent name
-let drafts = new Map();   // matchKey -> draftState
+let matches = new Map();
+let drafts = new Map();
 
-// matchKey is always the two names sorted alphabetically, so both players share one draft
-function matchKey(a, b) {
-    return [a, b].sort().join("::");
+const ALL_GOALS = [
+  { id: 0,  name: "Milk Bucket",       desc: "Obtain a bucket of milk from a cow." },
+  { id: 1,  name: "Spyglass",          desc: "Craft a Spyglass (requires Copper and Amethyst)." },
+  { id: 2,  name: "Rabbit Stew",       desc: "Craft a bowl of Rabbit Stew." },
+  { id: 3,  name: "Honey Bottle",      desc: "Harvest honey from a bee nest or hive." },
+  { id: 4,  name: "Crying Obsidian",   desc: "Obtain one piece of Crying Obsidian." },
+  { id: 5,  name: "Slime Block",       desc: "Craft or find a Slime Block." },
+  { id: 6,  name: "Clock",             desc: "Craft a Clock (requires Gold and Redstone)." },
+  { id: 7,  name: "Golden Carrot",     desc: "Craft or find a Golden Carrot." },
+  { id: 8,  name: "Cake",              desc: "Craft a full Cake." },
+  { id: 9,  name: "Crossbow",          desc: "Obtain a Crossbow (from crafting or a Pillager)." },
+  { id: 10, name: "Firework Star",     desc: "Craft a Firework Star." },
+  { id: 11, name: "Dried Kelp Block",  desc: "Smelt and craft a block of Dried Kelp." },
+  { id: 12, name: "Amethyst Shard",    desc: "Find and mine an Amethyst Geode." },
+  { id: 13, name: "Armor Stand",       desc: "Craft an Armor Stand." },
+  { id: 14, name: "Suspicious Stew",   desc: "Craft or find Suspicious Stew." },
+  { id: 15, name: "Magma Block",       desc: "Obtain a Magma Block from the Nether or a Ruined Portal." },
+  { id: 16, name: "Moss Block",        desc: "Find or trade for a Moss Block." },
+  { id: 17, name: "Raw Copper",        desc: "Mine a piece of Raw Copper." },
+  { id: 18, name: "Snowball",          desc: "Collect a stack of 16 Snowballs." },
+  { id: 19, name: "Scaffolding",       desc: "Craft Scaffolding (requires Bamboo and String)." },
+  { id: 20, name: "Name Tag",          desc: "Find a Name Tag in a loot chest or via fishing." },
+  { id: 21, name: "Pufferfish",        desc: "Catch a Pufferfish with a bucket or fishing rod." },
+  { id: 22, name: "Glazed Terracotta", desc: "Smelt dyed Terracotta to get a Glazed variant." },
+  { id: 23, name: "Pumpkin Pie",       desc: "Craft a Pumpkin Pie." },
+  { id: 24, name: "Bookshelf",         desc: "Craft a Bookshelf." },
+];
+
+function matchKey(a, b) { return [a, b].sort().join("::"); }
+
+function pickRandom(pool) {
+  const idx = Math.floor(Math.random() * pool.length);
+  return pool.splice(idx, 1)[0];
+}
+
+function generateOffer(draft) {
+  if (draft.pool.length < 2) return null;
+  const a = pickRandom(draft.pool);
+  const b = pickRandom(draft.pool);
+  draft.currentOffer = [a, b];
 }
 
 function createDraft(player1, player2) {
-    return {
-        player1,          // the player who joined second (got the match response)
-        player2,          // the player who was waiting in queue
-        currentTurn: player1,  // player1 picks first
-        turnStartTime: Date.now(),
-        roundLimit: 1,
-        picksInCurrentRound: 0,
-        turnDurationMs: 10000,
-    };
+  const pool = ALL_GOALS.map(g => ({ ...g }));
+  const draft = {
+    player1,
+    player2,
+    currentTurn: player1,
+    turnStartTime: Date.now(),
+    roundLimit: 1,
+    picksInCurrentRound: 0,
+    turnDurationMs: 10000,
+    pool,
+    board: new Array(25).fill(null), // each slot: goal object or null
+    currentOffer: null,
+  };
+  generateOffer(draft);
+  return draft;
 }
 
 function getOpponent(draft, name) {
-    return draft.player1 === name ? draft.player2 : draft.player1;
+  return draft.player1 === name ? draft.player2 : draft.player1;
 }
 
 function advanceTurn(draft) {
-    draft.picksInCurrentRound++;
-    draft.turnStartTime = Date.now();
-
-    if (draft.picksInCurrentRound >= draft.roundLimit) {
-        draft.currentTurn = getOpponent(draft, draft.currentTurn);
-        draft.picksInCurrentRound = 0;
-        draft.roundLimit = 2; // after first round, always 2 picks per turn (snake)
-    }
+  draft.picksInCurrentRound++;
+  draft.turnStartTime = Date.now();
+  if (draft.picksInCurrentRound >= draft.roundLimit) {
+    draft.currentTurn = getOpponent(draft, draft.currentTurn);
+    draft.picksInCurrentRound = 0;
+    draft.roundLimit = 2;
+  }
+  generateOffer(draft);
 }
 
-app.get("/", (req, res) => {
-    res.send("Matchmaking server is online.");
-});
+function getDraftForPlayer(name) {
+  const opponent = matches.get(name);
+  if (!opponent) return null;
+  return drafts.get(matchKey(name, opponent));
+}
 
+app.get("/", (req, res) => res.send("Matchmaking server is online."));
 
-// JOIN ROUTE
 app.post("/join", (req, res) => {
-    const name = req.body?.name;
+  const name = req.body?.name;
+  if (!name) return res.status(400).json({ error: "no name provided" });
 
-    console.log("JOIN:", req.body);
+  if (queue.length > 0) {
+    const opponent = queue.shift();
+    matches.set(name, opponent.name);
+    matches.set(opponent.name, name);
+    const key = matchKey(name, opponent.name);
+    const draft = createDraft(name, opponent.name);
+    drafts.set(key, draft);
+    console.log("MATCH:", name, "vs", opponent.name);
+    return res.json({ match: true, opponent: opponent.name });
+  }
 
-    if (!name) {
-        return res.status(400).json({ error: "no name provided" });
-    }
-
-    if (queue.length > 0) {
-        const opponent = queue.shift();
-
-        matches.set(name, opponent.name);
-        matches.set(opponent.name, name);
-
-        const key = matchKey(name, opponent.name);
-        const draft = createDraft(name, opponent.name);
-        drafts.set(key, draft);
-
-        console.log("MATCH:", name, "vs", opponent.name, "| Draft created, first turn:", draft.currentTurn);
-
-        return res.json({
-            match: true,
-            opponent: opponent.name
-        });
-    }
-
-    queue.push({ name });
-
-    console.log("QUEUED:", name);
-
-    return res.json({ match: false });
+  queue.push({ name });
+  console.log("QUEUED:", name);
+  return res.json({ match: false });
 });
 
-
-// STATUS ROUTE
 app.post("/status", (req, res) => {
-    const name = req.body?.name;
-
-    if (!name) {
-        return res.status(400).json({ error: "no name provided" });
-    }
-
-    const opponent = matches.get(name);
-
-    if (opponent) {
-        return res.json({ match: true, opponent });
-    }
-
-    return res.json({ match: false });
+  const name = req.body?.name;
+  if (!name) return res.status(400).json({ error: "no name provided" });
+  const opponent = matches.get(name);
+  if (opponent) return res.json({ match: true, opponent });
+  return res.json({ match: false });
 });
 
-
-// DRAFT STATE ROUTE — clients poll this to sync turn
 app.post("/draft/state", (req, res) => {
-    const name = req.body?.name;
+  const name = req.body?.name;
+  if (!name) return res.status(400).json({ error: "no name provided" });
 
-    if (!name) {
-        return res.status(400).json({ error: "no name provided" });
+  const draft = getDraftForPlayer(name);
+  if (!draft) return res.status(404).json({ error: "no draft found" });
+
+  // Server-side timeout
+  const elapsed = Date.now() - draft.turnStartTime;
+  if (elapsed >= draft.turnDurationMs) {
+    console.log("TURN TIMEOUT — advancing from", draft.currentTurn);
+    // Put offer back in pool on timeout, generate fresh one
+    if (draft.currentOffer) {
+      draft.pool.push(...draft.currentOffer);
+      draft.currentOffer = null;
     }
-
-    const opponent = matches.get(name);
-    if (!opponent) {
-        return res.status(404).json({ error: "no active match for this player" });
-    }
-
-    const key = matchKey(name, opponent);
-    const draft = drafts.get(key);
-    if (!draft) {
-        return res.status(404).json({ error: "no draft found for this match" });
-    }
-
-    // Server-side timer expiry — if the current player ran out of time, advance the turn
-    const elapsed = Date.now() - draft.turnStartTime;
-    if (elapsed >= draft.turnDurationMs) {
-        console.log("TURN TIMEOUT — advancing from", draft.currentTurn);
-        advanceTurn(draft);
-    }
-
-    const isMyTurn = draft.currentTurn === name;
-    const timeRemaining = Math.max(0, draft.turnDurationMs - (Date.now() - draft.turnStartTime));
-
-    return res.json({
-        isMyTurn,
-        currentTurn: draft.currentTurn,
-        timeRemaining,
-        turnDurationMs: draft.turnDurationMs,
-    });
-});
-
-
-// DRAFT PICK ROUTE — client calls this when a pick is made
-app.post("/draft/pick", (req, res) => {
-    const name = req.body?.name;
-
-    if (!name) {
-        return res.status(400).json({ error: "no name provided" });
-    }
-
-    const opponent = matches.get(name);
-    if (!opponent) {
-        return res.status(404).json({ error: "no active match for this player" });
-    }
-
-    const key = matchKey(name, opponent);
-    const draft = drafts.get(key);
-    if (!draft) {
-        return res.status(404).json({ error: "no draft found for this match" });
-    }
-
-    if (draft.currentTurn !== name) {
-        return res.status(403).json({ error: "not your turn" });
-    }
-
     advanceTurn(draft);
+  }
 
-    console.log("PICK by", name, "| Now:", draft.currentTurn, "picks turn");
+  const isMyTurn = draft.currentTurn === name;
+  const timeRemaining = Math.max(0, draft.turnDurationMs - (Date.now() - draft.turnStartTime));
 
-    return res.json({
-        ok: true,
-        currentTurn: draft.currentTurn,
-    });
+  return res.json({
+    isMyTurn,
+    currentTurn: draft.currentTurn,
+    timeRemaining,
+    turnDurationMs: draft.turnDurationMs,
+    offer: draft.currentOffer,   // both players always see the current offer
+    board: draft.board,
+  });
 });
 
+app.post("/draft/pick", (req, res) => {
+  const { name, goalId } = req.body;
+  if (!name || goalId === undefined) {
+    return res.status(400).json({ error: "name and goalId required" });
+  }
 
-// LEAVE ROUTE
+  const draft = getDraftForPlayer(name);
+  if (!draft) return res.status(404).json({ error: "no draft found" });
+  if (draft.currentTurn !== name) return res.status(403).json({ error: "not your turn" });
+
+  const offer = draft.currentOffer;
+  if (!offer) return res.status(400).json({ error: "no active offer" });
+
+  const chosenIdx = offer.findIndex(g => g.id === goalId);
+  if (chosenIdx === -1) return res.status(400).json({ error: "goalId not in current offer" });
+
+  // Place chosen goal in next empty board slot
+  const boardSlot = draft.board.findIndex(s => s === null);
+  if (boardSlot !== -1) draft.board[boardSlot] = offer[chosenIdx];
+
+  // Unchosen goal goes back in the pool
+  const unchosen = offer[1 - chosenIdx];
+  draft.pool.push(unchosen);
+  draft.currentOffer = null;
+
+  advanceTurn(draft);
+
+  console.log(`PICK by ${name}: ${offer[chosenIdx].name} → board[${boardSlot}]`);
+  return res.json({ ok: true, boardSlot, pickedGoal: offer[chosenIdx] });
+});
+
 app.post("/leave", (req, res) => {
-    const name = req.body?.name;
-    const opponent = matches.get(name);
-
-    if (opponent) {
-        const key = matchKey(name, opponent);
-        drafts.delete(key);
-        matches.delete(opponent);
-    }
-
-    matches.delete(name);
-    queue = queue.filter(p => p.name !== name);
-
-    res.json({ ok: true });
+  const name = req.body?.name;
+  const opponent = matches.get(name);
+  if (opponent) {
+    drafts.delete(matchKey(name, opponent));
+    matches.delete(opponent);
+  }
+  matches.delete(name);
+  queue = queue.filter(p => p.name !== name);
+  res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
-});
+app.listen(PORT, () => console.log("Server running on port " + PORT));
