@@ -130,14 +130,21 @@ app.post("/draft/state", (req, res) => {
   // Server-side timeout
   const elapsed = Date.now() - draft.turnStartTime;
   if (elapsed >= draft.turnDurationMs) {
-    console.log("TURN TIMEOUT — advancing from", draft.currentTurn);
-    // Put offer back in pool on timeout, generate fresh one
-    if (draft.currentOffer) {
-      draft.pool.push(...draft.currentOffer);
-      draft.currentOffer = null;
+    console.log("TURN TIMEOUT — auto-picking for", draft.currentTurn);
+    if (draft.currentOffer && draft.currentOffer.length === 2) {
+        const chosen = draft.currentOffer[Math.floor(Math.random() * 2)];
+        const unchosen = draft.currentOffer.find(g => g.id !== chosen.id);
+
+        const boardSlot = draft.board.findIndex(s => s === null);
+        if (boardSlot !== -1) draft.board[boardSlot] = chosen;
+
+        draft.pool.push(unchosen);
+        draft.currentOffer = null;
+
+        console.log(`AUTO-PICK: ${chosen.name} → board[${boardSlot}]`);
     }
     advanceTurn(draft);
-  }
+}
 
   const isMyTurn = draft.currentTurn === name;
   const timeRemaining = Math.max(0, draft.turnDurationMs - (Date.now() - draft.turnStartTime));
