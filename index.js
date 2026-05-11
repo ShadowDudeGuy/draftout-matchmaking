@@ -9,6 +9,13 @@ let queue = [];
 let matches = new Map();
 let drafts = new Map();
 
+// ─────────────────────────────────────────────────────────────
+// SEED SYSTEM (NEW)
+// ─────────────────────────────────────────────────────────────
+function generateSeed() {
+  return Math.floor(Math.random() * 2 ** 32);
+}
+
 const ALL_GOALS = [
   { id: 0,  name: "Milk Bucket",       desc: "Obtain a bucket of milk from a cow." },
   { id: 1,  name: "Spyglass",          desc: "Craft a Spyglass (requires Copper and Amethyst)." },
@@ -35,6 +42,10 @@ const ALL_GOALS = [
   { id: 22, name: "Glazed Terracotta", desc: "Smelt dyed Terracotta to get a Glazed variant." },
   { id: 23, name: "Pumpkin Pie",       desc: "Craft a Pumpkin Pie." },
   { id: 24, name: "Bookshelf",         desc: "Craft a Bookshelf." },
+
+  // ───── NEW GOALS ─────
+  { id: 25, name: "Lodestone", desc: "Craft a Lodestone using Netherite Ingot and Chiseled Stone Bricks." },
+  { id: 26, name: "Elytra",    desc: "Find and obtain Elytra from an End Ship." },
 ];
 
 function matchKey(a, b) { return [a, b].sort().join("::"); }
@@ -62,9 +73,13 @@ function createDraft(player1, player2) {
     picksInCurrentRound: 0,
     turnDurationMs: 10000,
     pool,
-    board: new Array(25).fill(null), // each slot: goal object or null
+    board: new Array(25).fill(null),
     currentOffer: null,
+
+    // ───── NEW ─────
+    seed: generateSeed(),
   };
+
   generateOffer(draft);
   return draft;
 }
@@ -76,11 +91,13 @@ function getOpponent(draft, name) {
 function advanceTurn(draft) {
   draft.picksInCurrentRound++;
   draft.turnStartTime = Date.now();
+
   if (draft.picksInCurrentRound >= draft.roundLimit) {
     draft.currentTurn = getOpponent(draft, draft.currentTurn);
     draft.picksInCurrentRound = 0;
     draft.roundLimit = 2;
   }
+
   generateOffer(draft);
 }
 
@@ -92,19 +109,33 @@ function getDraftForPlayer(name) {
 
 app.get("/", (req, res) => res.send("Matchmaking server is online."));
 
+// ─────────────────────────────────────────────────────────────
+// MATCHMAKING (ONLY ADD SEED HOOK)
+// ─────────────────────────────────────────────────────────────
 app.post("/join", (req, res) => {
   const name = req.body?.name;
   if (!name) return res.status(400).json({ error: "no name provided" });
 
   if (queue.length > 0) {
     const opponent = queue.shift();
+
     matches.set(name, opponent.name);
     matches.set(opponent.name, name);
+
     const key = matchKey(name, opponent.name);
     const draft = createDraft(name, opponent.name);
+
     drafts.set(key, draft);
-    console.log("MATCH:", name, "vs", opponent.name);
-    return res.json({ match: true, opponent: opponent.name });
+
+    console.log("MATCH:", name, "vs", opponent.name, "seed:", draft.seed);
+
+    return res.json({
+      match: true,
+      opponent: opponent.name,
+
+      // ───── NEW ─────
+      seed: draft.seed,
+    });
   }
 
   queue.push({ name });
@@ -115,11 +146,16 @@ app.post("/join", (req, res) => {
 app.post("/status", (req, res) => {
   const name = req.body?.name;
   if (!name) return res.status(400).json({ error: "no name provided" });
+
   const opponent = matches.get(name);
   if (opponent) return res.json({ match: true, opponent });
+
   return res.json({ match: false });
 });
 
+// ─────────────────────────────────────────────────────────────
+// DRAFT STATE (ADD SEED RETURN)
+// ─────────────────────────────────────────────────────────────
 app.post("/draft/state", (req, res) => {
   const name = req.body?.name;
   if (!name) return res.status(400).json({ error: "no name provided" });
@@ -127,38 +163,46 @@ app.post("/draft/state", (req, res) => {
   const draft = getDraftForPlayer(name);
   if (!draft) return res.status(404).json({ error: "no draft found" });
 
-  // Server-side timeout
   const elapsed = Date.now() - draft.turnStartTime;
+
   if (elapsed >= draft.turnDurationMs) {
     console.log("TURN TIMEOUT — auto-picking for", draft.currentTurn);
+
     if (draft.currentOffer && draft.currentOffer.length === 2) {
-        const chosen = draft.currentOffer[Math.floor(Math.random() * 2)];
-        const unchosen = draft.currentOffer.find(g => g.id !== chosen.id);
+      const chosen = draft.currentOffer[Math.floor(Math.random() * 2)];
+      const unchosen = draft.currentOffer.find(g => g.id !== chosen.id);
 
-        const boardSlot = draft.board.findIndex(s => s === null);
-        if (boardSlot !== -1) draft.board[boardSlot] = chosen;
+      const boardSlot = draft.board.findIndex(s => s === null);
+      if (boardSlot !== -1) draft.board[boardSlot] = chosen;
 
-        draft.pool.push(unchosen);
-        draft.currentOffer = null;
+      draft.pool.push(unchosen);
+      draft.currentOffer = null;
 
-        console.log(`AUTO-PICK: ${chosen.name} → board[${boardSlot}]`);
+      console.log(`AUTO-PICK: ${chosen.name} → board[${boardSlot}]`);
     }
+
     advanceTurn(draft);
-}
+  }
 
   const isMyTurn = draft.currentTurn === name;
-  const timeRemaining = Math.max(0, draft.turnDurationMs - (Date.now() - draft.turnStartTime));
+  const timeRemaining = Math.max(0, draft.turnDurationMs - elapsed);
 
   return res.json({
     isMyTurn,
     currentTurn: draft.currentTurn,
     timeRemaining,
     turnDurationMs: draft.turnDurationMs,
-    offer: draft.currentOffer,   // both players always see the current offer
+    offer: draft.currentOffer,
     board: draft.board,
+
+    // ───── NEW ─────
+    seed: draft.seed,
   });
 });
 
+// ─────────────────────────────────────────────────────────────
+// PICK (UNCHANGED LOGIC)
+// ─────────────────────────────────────────────────────────────
 app.post("/draft/pick", (req, res) => {
   const { name, goalId } = req.body;
   if (!name || goalId === undefined) {
@@ -175,11 +219,9 @@ app.post("/draft/pick", (req, res) => {
   const chosenIdx = offer.findIndex(g => g.id === goalId);
   if (chosenIdx === -1) return res.status(400).json({ error: "goalId not in current offer" });
 
-  // Place chosen goal in next empty board slot
   const boardSlot = draft.board.findIndex(s => s === null);
   if (boardSlot !== -1) draft.board[boardSlot] = offer[chosenIdx];
 
-  // Unchosen goal goes back in the pool
   const unchosen = offer[1 - chosenIdx];
   draft.pool.push(unchosen);
   draft.currentOffer = null;
@@ -187,18 +229,22 @@ app.post("/draft/pick", (req, res) => {
   advanceTurn(draft);
 
   console.log(`PICK by ${name}: ${offer[chosenIdx].name} → board[${boardSlot}]`);
+
   return res.json({ ok: true, boardSlot, pickedGoal: offer[chosenIdx] });
 });
 
 app.post("/leave", (req, res) => {
   const name = req.body?.name;
   const opponent = matches.get(name);
+
   if (opponent) {
     drafts.delete(matchKey(name, opponent));
     matches.delete(opponent);
   }
+
   matches.delete(name);
   queue = queue.filter(p => p.name !== name);
+
   res.json({ ok: true });
 });
 
