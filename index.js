@@ -9,43 +9,38 @@ let queue = [];
 let matches = new Map();
 let drafts = new Map();
 
-// ─────────────────────────────────────────────────────────────
-// SEED SYSTEM (NEW)
-// ─────────────────────────────────────────────────────────────
 function generateSeed() {
   return Math.floor(Math.random() * 2 ** 32);
 }
 
 const ALL_GOALS = [
-  { id: 0,  name: "Milk Bucket",       desc: "Obtain a bucket of milk from a cow." },
-  { id: 1,  name: "Spyglass",          desc: "Craft a Spyglass (requires Copper and Amethyst)." },
-  { id: 2,  name: "Rabbit Stew",       desc: "Craft a bowl of Rabbit Stew." },
-  { id: 3,  name: "Honey Bottle",      desc: "Harvest honey from a bee nest or hive." },
-  { id: 4,  name: "Crying Obsidian",   desc: "Obtain one piece of Crying Obsidian." },
-  { id: 5,  name: "Slime Block",       desc: "Craft or find a Slime Block." },
-  { id: 6,  name: "Clock",             desc: "Craft a Clock (requires Gold and Redstone)." },
-  { id: 7,  name: "Golden Carrot",     desc: "Craft or find a Golden Carrot." },
-  { id: 8,  name: "Cake",              desc: "Craft a full Cake." },
-  { id: 9,  name: "Crossbow",          desc: "Obtain a Crossbow (from crafting or a Pillager)." },
+  { id: 0,  name: "Milk Bucket",       desc: "Get milk from a cow." },
+  { id: 1,  name: "Spyglass",          desc: "Craft a Spyglass." },
+  { id: 2,  name: "Rabbit Stew",       desc: "Craft Rabbit Stew." },
+  { id: 3,  name: "Honey Bottle",      desc: "Harvest honey from a bee nest." },
+  { id: 4,  name: "Crying Obsidian",   desc: "Obtain Crying Obsidian." },
+  { id: 5,  name: "Slime Block",       desc: "Craft a Slime Block." },
+  { id: 6,  name: "Clock",             desc: "Craft a Clock." },
+  { id: 7,  name: "Golden Carrot",     desc: "Craft a Golden Carrot." },
+  { id: 8,  name: "Cake",              desc: "Craft a Cake." },
+  { id: 9,  name: "Crossbow",          desc: "Obtain a Crossbow." },
   { id: 10, name: "Firework Star",     desc: "Craft a Firework Star." },
-  { id: 11, name: "Dried Kelp Block",  desc: "Smelt and craft a block of Dried Kelp." },
-  { id: 12, name: "Amethyst Shard",    desc: "Find and mine an Amethyst Geode." },
+  { id: 11, name: "Dried Kelp Block",  desc: "Craft a Dried Kelp Block." },
+  { id: 12, name: "Amethyst Shard",    desc: "Mine an Amethyst Geode." },
   { id: 13, name: "Armor Stand",       desc: "Craft an Armor Stand." },
   { id: 14, name: "Suspicious Stew",   desc: "Craft or find Suspicious Stew." },
-  { id: 15, name: "Magma Block",       desc: "Obtain a Magma Block from the Nether or a Ruined Portal." },
+  { id: 15, name: "Magma Block",       desc: "Get a Magma Block from the Nether." },
   { id: 16, name: "Moss Block",        desc: "Find or trade for a Moss Block." },
-  { id: 17, name: "Raw Copper",        desc: "Mine a piece of Raw Copper." },
-  { id: 18, name: "Snowball",          desc: "Collect a stack of 16 Snowballs." },
-  { id: 19, name: "Scaffolding",       desc: "Craft Scaffolding (requires Bamboo and String)." },
-  { id: 20, name: "Name Tag",          desc: "Find a Name Tag in a loot chest or via fishing." },
-  { id: 21, name: "Pufferfish",        desc: "Catch a Pufferfish with a bucket or fishing rod." },
-  { id: 22, name: "Glazed Terracotta", desc: "Smelt dyed Terracotta to get a Glazed variant." },
+  { id: 17, name: "Raw Copper",        desc: "Mine Raw Copper." },
+  { id: 18, name: "Snowball",          desc: "Collect 16 Snowballs." },
+  { id: 19, name: "Scaffolding",       desc: "Craft Scaffolding." },
+  { id: 20, name: "Name Tag",          desc: "Find a Name Tag in a chest or by fishing." },
+  { id: 21, name: "Pufferfish",        desc: "Catch a Pufferfish." },
+  { id: 22, name: "Glazed Terracotta", desc: "Smelt dyed Terracotta." },
   { id: 23, name: "Pumpkin Pie",       desc: "Craft a Pumpkin Pie." },
   { id: 24, name: "Bookshelf",         desc: "Craft a Bookshelf." },
-
-  // ───── NEW GOALS ─────
-  { id: 25, name: "Lodestone", desc: "Craft a Lodestone using Netherite Ingot and Chiseled Stone Bricks." },
-  { id: 26, name: "Elytra",    desc: "Find and obtain Elytra from an End Ship." },
+  { id: 25, name: "Lodestone",         desc: "Craft a Lodestone." },
+  { id: 26, name: "Elytra",            desc: "Find Elytra in an End Ship." },
 ];
 
 function matchKey(a, b) { return [a, b].sort().join("::"); }
@@ -75,9 +70,8 @@ function createDraft(player1, player2) {
     pool,
     board: new Array(25).fill(null),
     currentOffer: null,
-
-    // ───── NEW ─────
     seed: generateSeed(),
+    completions: [], // { player, goalId, goalName }
   };
 
   generateOffer(draft);
@@ -109,9 +103,6 @@ function getDraftForPlayer(name) {
 
 app.get("/", (req, res) => res.send("Matchmaking server is online."));
 
-// ─────────────────────────────────────────────────────────────
-// MATCHMAKING (ONLY ADD SEED HOOK)
-// ─────────────────────────────────────────────────────────────
 app.post("/join", (req, res) => {
   const name = req.body?.name;
   if (!name) return res.status(400).json({ error: "no name provided" });
@@ -129,13 +120,7 @@ app.post("/join", (req, res) => {
 
     console.log("MATCH:", name, "vs", opponent.name, "seed:", draft.seed);
 
-    return res.json({
-      match: true,
-      opponent: opponent.name,
-
-      // ───── NEW ─────
-      seed: draft.seed,
-    });
+    return res.json({ match: true, opponent: opponent.name, seed: draft.seed });
   }
 
   queue.push({ name });
@@ -153,9 +138,6 @@ app.post("/status", (req, res) => {
   return res.json({ match: false });
 });
 
-// ─────────────────────────────────────────────────────────────
-// DRAFT STATE (ADD SEED RETURN)
-// ─────────────────────────────────────────────────────────────
 app.post("/draft/state", (req, res) => {
   const name = req.body?.name;
   if (!name) return res.status(400).json({ error: "no name provided" });
@@ -194,15 +176,30 @@ app.post("/draft/state", (req, res) => {
     turnDurationMs: draft.turnDurationMs,
     offer: draft.currentOffer,
     board: draft.board,
-
-    // ───── NEW ─────
     seed: draft.seed,
+    completions: draft.completions,
   });
 });
 
-// ─────────────────────────────────────────────────────────────
-// PICK (UNCHANGED LOGIC)
-// ─────────────────────────────────────────────────────────────
+app.post("/draft/complete", (req, res) => {
+  const { name, goalId } = req.body;
+  if (!name || goalId === undefined) {
+    return res.status(400).json({ error: "name and goalId required" });
+  }
+
+  const draft = getDraftForPlayer(name);
+  if (!draft) return res.status(404).json({ error: "no draft found" });
+
+  const already = draft.completions.find(c => c.player === name && c.goalId === goalId);
+  if (!already) {
+    const goal = ALL_GOALS.find(g => g.id === goalId);
+    draft.completions.push({ player: name, goalId, goalName: goal?.name ?? "Unknown" });
+    console.log(`${name} completed: ${goal?.name}`);
+  }
+
+  return res.json({ ok: true });
+});
+
 app.post("/draft/pick", (req, res) => {
   const { name, goalId } = req.body;
   if (!name || goalId === undefined) {
